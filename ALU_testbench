@@ -1,0 +1,57 @@
+//ALU Testbench code
+module NEW_ALU_TB;
+  parameter OUT = 4, CMD_WIDTH = 4;
+
+  reg CLK, RESET, MODE, CE, CIN;
+  reg [1:0] IP_VALID;
+  reg [OUT-1:0] OPA, OPB;
+  reg [CMD_WIDTH-1:0] CMD;
+  wire [2*OUT:0] RES;
+  wire OFLOW, COUT, ERR, G, L, E;
+
+  NEW_ALU #(OUT, CMD_WIDTH) DUT (
+    .OPA(OPA), .OPB(OPB), .CMD(CMD),
+    .RESET(RESET), .CLK(CLK), .MODE(MODE), .CE(CE), .CIN(CIN),
+    .IP_VALID(IP_VALID),
+    .RES(RES), .OFLOW(OFLOW), .COUT(COUT), .ERR(ERR), .G(G), .L(L), .E(E)
+  );
+
+  initial begin
+    CLK = 0;
+    forever #5 CLK = ~CLK;
+  end
+
+  initial begin
+    $dumpfile("dump.vcd");
+    $dumpvars(1);
+    $display("TIME | CMD | OPA | OPB | RES | COUT | OFLOW | ERR | G | L | E");
+    $monitor("%2t  |  %b  | %d | %d | %b | %b | %b | %b | %b | %b | %b", $time, CMD, OPA, OPB, RES, COUT, OFLOW, ERR,G,L,E);
+
+    RESET = 1;
+    #5 RESET = 0;
+
+    CE = 1; MODE = 1; CIN = 0;
+    IP_VALID = 2'b11;
+
+   CMD = 4'b0000; OPA = 4'd5; OPB = 4'd5; 
+
+
+  #20 CMD = 4'b1011; OPA = 4'd7; OPB = 4'd4; 
+#20  CMD = 4'b1100; OPA = 4'd3; OPB = 4'd4;
+#20  CMD = 4'b1000; OPA = 4'd3; OPB = 4'd4;
+// #20  CMD = 4'b1000; OPA = 4'd3; OPB = 4'd3;
+//  #20  CMD = 4'b1000; OPA = 4'd6; OPB = 4'd5;
+//  #20  CMD = 4'b1000; OPA = 4'dx; OPB = 4'd4;
+////     #10  CMD = 4'b1101; OPA = 4'b1011; OPB = 4'b0001;
+     
+// #20  IP_VALID=2'b10;CMD = 4'b0110; OPA = 4'd15; OPB = 4'd14;
+//   #20  CMD = 4'b1000; OPA = 4'd1; OPB = 4'd4;
+//   #20  CMD = 4'b1001; OPA = 4'd3; OPB = 4'd5;
+//  #20  IP_VALID=2'b01;CMD = 4'b0111; OPA = 4'b1000; OPB = 4'b1000;
+//     #20 CMD = 4'b1010; OPA = 4'b1000; OPB = 4'b0010;
+//     #20 CMD = 4'b1011; OPA = 4'b1000; OPB = 4'b0010;
+//     #20 IP_VALID=2'b00;
+ 
+    #200 $finish;
+  end
+endmodule
