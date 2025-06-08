@@ -1,0 +1,521 @@
+`define MUL
+module NEW_ALU #(parameter OUT=4,parameter CMD_WIDTH=4)
+(OPA,OPB,CIN,CLK,RESET,CMD,CE,MODE,IP_VALID,COUT,OFLOW,RES,G,E,L,ERR);
+    input [OUT-1:0] OPA,OPB;
+    input CLK,RESET,CE,MODE,CIN;
+    input [CMD_WIDTH-1:0] CMD;
+    input [1:0]IP_VALID;
+
+    output reg COUT;
+    output reg OFLOW;
+    output reg G;
+    output reg E;
+    output reg L;
+    output reg ERR;
+
+    `ifdef MUL
+        output reg[2*OUT:0] RES;
+     `else
+        output reg[OUT:0] RES;
+     `endif
+  //reg [IP1:0] OPA_REG, OPB_REG;
+  reg [OUT:0] Temp1;
+  reg Temp2;
+
+  // FOR SIGNED
+  reg  [OUT:0] S_RESULT;
+  wire signed [OUT-1:0] S_OPA = OPA;
+  wire signed [OUT-1:0] S_OPB = OPB;
+
+  // FOR MULTIPLICATION
+  reg [OUT-1:0] OPA_STAGE1, OPB_STAGE1;
+  reg [OUT:0]   OPA_STAGE2, OPB_STAGE2;
+  reg [2*OUT:0] T1_STAGE3;
+//FOR ROTATION
+  localparam SHIFT_WIDTH = $clog2(OUT);
+  wire [SHIFT_WIDTH-1:0] SHIFT_AMOUNT = OPB[SHIFT_WIDTH-1:0];
+  wire INVALID = |OPB[OUT-1:SHIFT_WIDTH];
+
+  always @(posedge CLK or posedge RESET) begin
+    if (RESET) begin
+      RES   <= {OUT{1'b0}};
+      ERR   <= 1'b0;
+      OFLOW <= 1'b0;
+      COUT  <= 1'b0;
+      G     <= 1'b0;
+      L     <= 1'b0;
+      E     <= 1'b0;
+      Temp1 <= {OUT{1'b0}};
+      S_RESULT<=0;
+      Temp2<=0;
+    end
+    else if (CE) begin
+      RES     <= {OUT{1'b0}};
+      ERR     <= 1'b0;
+      OFLOW   <= 1'b0;
+      COUT    <= 1'b0;
+      G       <= 1'b0;
+      L       <= 1'b0;
+      E       <= 1'b0;
+      Temp1   <= {OUT{1'b0}};
+      S_RESULT<=0;
+      Temp2<=0;
+
+      if (MODE) begin
+        case (IP_VALID)
+          2'b00: begin
+            RES <= {OUT{1'b0}};
+
+          end
+
+          2'b11: begin
+            case (CMD)
+              4'b0000: begin // ADD
+                Temp1 <= OPA + OPB;
+                RES <= Temp1;
+                Temp2 <= Temp1[4];
+                COUT <=Temp2;
+              end
+              4'b0001: begin // SUB
+                Temp1 <= OPA - OPB;
+                RES <= Temp1;
+                OFLOW <= (OPA<OPB)?1:0;
+                //OFLOW <=Temp2;
+              end
+              4'b0010: begin // ADD + CIN
+                Temp1 <= OPA + OPB + CIN;
+                RES <= Temp1;
+                Temp2 <= Temp1[4];
+                COUT <=Temp2;
+              end
+              4'b0011: begin // SUB - CIN
+                Temp1 <= OPA - OPB - CIN;
+                RES <= Temp1;
+                OFLOW <= (Temp1[4])?1:0;
+               // OFLOW <=Temp2;
+              end
+              4'b1000: begin // CMP
+                if (OPA == OPB) E <= 1;
+                else if (OPA < OPB) L <= 1;
+                else if (OPA > OPB) G <= 1;
+                else begin
+                  E <= 1'b0;
+                  G <= 1'b0;
+                  L <= 1'b0;
+                end
+              end
+              4'b1001: begin // INC and MUL (OPA+1)*(OPB+1)
+                OPA_STAGE1 = OPA;
+                OPB_STAGE1 = OPB;
+                OPA_STAGE2 <= OPA_STAGE1 + 1;
+                OPB_STAGE2 <= OPB_STAGE1 + 1;
+                T1_STAGE3 <= OPA_STAGE2 * OPB_STAGE2;
+                RES <= T1_STAGE3;
+
+              end
+              4'b1010: begin // (OPA<<1) * OPB
+                OPA_STAGE1 = OPA;
+                OPB_STAGE1 = OPB;
+                OPA_STAGE2 <= OPA_STAGE1 << 1;
+                T1_STAGE3 <= OPA_STAGE2 * OPB;
+                RES <= T1_STAGE3;
+
+              end
+              4'b1011: begin // Signed ADD
+                S_RESULT <= S_OPA + S_OPB;
+                RES <= S_RESULT;
+                OFLOW <= (S_OPA[3] == S_OPB[3]) && (S_RESULT[3] != S_OPA[3]);
+             //   OFLOW <= Temp2;
+                if (S_OPA == S_OPB) E <= 1;
+                else if (S_OPA < S_OPB) L <= 1;
+                else G <= 1;
+              end
+              4'b1100: begin // Signed SUB
+                S_RESULT <= S_OPA - S_OPB;
+                RES <= S_RESULT;
+               OFLOW <= (S_OPA[3] != S_OPB[3]) && (S_RESULT[3] != S_OPA[3]);
+              //  OFLOW <= Temp2;
+                if (S_OPA == S_OPB) E <= 1;
+                else if (S_OPA < S_OPB) L <= 1;
+                else G <= 1;
+              end
+              default: begin
+
+                RES <= {OUT{1'b0}};
+              end
+            endcase
+          end
+
+          2'b10: begin
+            case (CMD)
+              4'b0100: begin
+              Temp1 <= OPA + 1;
+              RES <= Temp1;
+              Temp2 <= Temp1[4];
+                COUT <=Temp2;
+              end //INC_A
+              4'b0101: begin
+              Temp1 <= OPA - 1;
+              RES <= Temp1;
+              OFLOW<=Temp1[4]?1:0;
+              end //DEC_A
+              default: RES <= {OUT{1'b0}};
+            endcase
+          end
+
+          2'b01: begin
+            case (CMD)
+              4'b0110: begin
+              Temp1 <= OPB + 1;
+              RES <= Temp1;
+              Temp2 <= Temp1[4];
+                COUT <=Temp2;
+              end//INC_B
+              4'b0111: begin
+              Temp1 <= OPB - 1;
+              RES <= Temp1;
+              OFLOW<=Temp1[4]?1:0;
+              end //DEC_B
+              default: RES <= {OUT{1'b0}};
+            endcase
+          end
+
+          default: begin end
+        endcase
+      end // MODE = 1
+      else begin
+        case (IP_VALID)
+          2'b00: begin
+            RES <= {OUT{1'b0}};
+
+          end
+
+          2'b11: begin
+            case (CMD)
+              4'b0000: begin Temp1 <= {1'b0,OPA & OPB}; RES <= Temp1; end //AND
+              4'b0001: begin Temp1 <= {1'b0,~(OPA & OPB)}; RES <= Temp1; end //NAND
+              4'b0010: begin Temp1 <= {1'b0,OPA | OPB}; RES <= Temp1; end//OR
+              4'b0011: begin Temp1 <= {1'b0,~(OPA | OPB)}; RES <= Temp1; end//NOR
+              4'b0100: begin Temp1 <= {1'b0,OPA ^ OPB}; RES <= Temp1; end//XOR
+              4'b0101: begin Temp1 <= {1'b0,~(OPA ^ OPB)}; RES <= Temp1; end//XNOR
+              4'b1100: begin//ROL_A_B
+                         if (INVALID)
+                                    ERR <= 1;
+                                else
+                                    Temp1<={1'b0,((OPA << SHIFT_AMOUNT) | (OPA >> (OUT - SHIFT_AMOUNT)))};
+                                    RES <= Temp1;
+                       end
+              4'b1101: begin//ROR_A_B
+                         if (INVALID)
+                                    ERR <= 1;
+                                else
+                                    Temp1<={1'b0,((OPA >> SHIFT_AMOUNT) | (OPA << (OUT - SHIFT_AMOUNT)))};
+                                    RES <= Temp1;
+
+                       end
+              default: begin  RES <= {OUT{1'b0}}; end
+            endcase
+          end
+
+          2'b10: begin
+            case (CMD)
+              4'b0110: begin Temp1<={1'b0, ~OPA}; RES<=Temp1;end//NOT_A
+              4'b1000: begin Temp1<= {1'b0,OPA>>1}; RES<=Temp1;end//SHRA_1
+              4'b1001: begin Temp1<= {1'b0,OPA<<1}; RES<=Temp1; end//SHLA_1
+              default: begin  RES <= {OUT{1'b0}}; end
+            endcase
+          end
+
+          2'b01: begin
+            case (CMD)
+              4'b0111: begin Temp1<={1'b0,~OPB}; RES<=Temp1; end//NOT_B
+              4'b1010: begin Temp1<={1'b0,OPB>>1}; RES<=Temp1; end//SHRB_1
+              4'b1011: begin Temp1<={1'b0,OPB<<1}; RES<=Temp1; end//SHLB_1
+              default: begin  RES <= {OUT{1'b0}};end
+            endcase
+          end
+
+          default: begin  RES <= {OUT{1'b0}};end
+        endcase
+      end // MODE = 0
+    end // CE
+  end // always
+endmodule
+[suhanrai@feserver Suhan]$ cat new_alu_tb.v
+`include "new_alu_rtl.v"
+module NEW_ALU_tb;
+
+  // Parameters
+  parameter IP1 = 4;
+  parameter IP2 = 4;
+  parameter OUT = 5;
+  parameter CM = 4;
+
+  // DUT I/O
+  reg  [IP1-1:0] OPA;
+  reg  [IP2-1:0] OPB;
+  reg  CLK, RESET, MODE, CE, CIN;
+  reg  [1:0] IP_VALID;
+  reg  [CM-1:0] CMD;
+
+  wire [OUT-1:0] RES;
+  wire COUT, OFLOW, ERR, G, L, E;
+
+  // Instantiate DUT
+  NEW_ALU #(.IP1(IP1), .IP2(IP2), .OUT(OUT), .CM(CM)) dut (
+    .OPA(OPA), .OPB(OPB),
+    .CLK(CLK), .RESET(RESET), .MODE(MODE), .CE(CE), .CIN(CIN),
+    .IP_VALID(IP_VALID), .CMD(CMD),
+    .RES(RES), .COUT(COUT), .OFLOW(OFLOW), .ERR(ERR), .G(G), .L(L), .E(E)
+  );
+
+  // Clock generation
+  always #5 CLK = ~CLK;
+
+  // Test task
+  task test_case;
+    input [IP1-1:0] a;
+    input [IP2-1:0] b;
+    input [CM-1:0] cmd;
+    input [1:0] valid;
+    input cin;
+    input mode;
+    begin
+      OPA = a;
+      OPB = b;
+      CMD = cmd;
+      IP_VALID = valid;
+      CIN = cin;
+      MODE = mode;
+      CE = 1;
+      @(posedge CLK); #1; // One clock cycle
+      CE = 0;
+      $display("CMD=%b | IP_VALID=%b | OPA=%d | OPB=%d | RES=%d | COUT=%b | OFLOW=%b | ERR=%b | G=%b E=%b L=%b",
+        CMD, IP_VALID, OPA, OPB, RES, COUT, OFLOW, ERR, G, E, L);
+    end
+  endtask
+
+  // Main test sequence
+  initial begin
+    // Initialize
+    CLK = 0; CE = 0; RESET = 1;
+    OPA = 0; OPB = 0; CMD = 0; IP_VALID = 2'b00; CIN = 0; MODE = 0;
+    #10 RESET = 0;
+
+    // Sample tests
+    // Arithmetic Mode (MODE=1)
+    test_case(4'd5, 4'd3, 4'b0000, 2'b11, 0, 1); // ADD
+    test_case(4'd7, 4'd2, 4'b0001, 2'b11, 0, 1); // SUB
+    test_case(4'd3, 4'd1, 4'b0010, 2'b11, 1, 1); // ADD + CIN
+    test_case(4'd3, 4'd1, 4'b0011, 2'b11, 1, 1); // SUB - CIN
+    test_case(4'd4, 4'd4, 4'b1000, 2'b11, 0, 1); // CMP Equal
+    test_case(4'd2, 4'd3, 4'b1000, 2'b11, 0, 1); // CMP Less
+    test_case(4'd3, 4'd2, 4'b1000, 2'b11, 0, 1); // CMP Greater
+    test_case(4'd3, 4'd2, 4'b1001, 2'b11, 0, 1); // (OPA+1)*(OPB+1)
+    test_case(4'd3, 4'd2, 4'b1010, 2'b11, 0, 1); // (OPA<<1)*OPB
+    test_case(4'd7, 4'd1, 4'b1011, 2'b11, 0, 1); // Signed ADD
+    test_case(4'd7, 4'd1, 4'b1100, 2'b11, 0, 1); // Signed SUB
+    test_case(4'd4, 0,    4'b0100, 2'b10, 0, 1); // INC_A
+    test_case(4'd4, 0,    4'b0101, 2'b10, 0, 1); // DEC_A
+    test_case(0,    4'd4, 4'b0110, 2'b01, 0, 1); // INC_B
+    test_case(0,    4'd4, 4'b0111, 2'b01, 0, 1); // DEC_B
+
+    // Logic Mode (MODE=0)
+    test_case(4'b1010, 4'b1100, 4'b0000, 2'b11, 0, 0); // AND
+    test_case(4'b1010, 4'b1100, 4'b0001, 2'b11, 0, 0); // NAND
+    test_case(4'b1010, 4'b1100, 4'b0010, 2'b11, 0, 0); // OR
+    test_case(4'b1010, 4'b1100, 4'b0011, 2'b11, 0, 0); // NOR
+    test_case(4'b1010, 4'b1100, 4'b0100, 2'b11, 0, 0); // XOR
+    test_case(4'b1010, 4'b1100, 4'b0101, 2'b11, 0, 0); // XNOR
+    test_case(4'b1100, 4'd1,     4'b1100, 2'b11, 0, 0); // ROL
+    test_case(4'b1100, 4'd1,     4'b1101, 2'b11, 0, 0); // ROR
+    test_case(4'd7,    0,        4'b0110, 2'b10, 0, 0); // NOT_A
+    test_case(4'd6,    0,        4'b1000, 2'b10, 0, 0); // SHRA_1
+    test_case(4'd6,    0,        4'b1001, 2'b10, 0, 0); // SHLA_1
+    test_case(0,       4'd7,     4'b0111, 2'b01, 0, 0); // NOT_B
+    test_case(0,       4'd6,     4'b1010, 2'b01, 0, 0); // SHRB_1
+    test_case(0,       4'd6,     4'b1011, 2'b01, 0, 0); // SHLB_1
+
+    #20;
+    $finish;
+  end
+
+endmodule
+[suhanrai@feserver Suhan]$ cat new_alu_selftb.v
+`include "new_alu_rtl.v"
+`define MUL
+`define PASS 1'b1
+`define FAIL 1'b0
+`define no_of_testcase 94
+
+
+module new_test_bench_alu #(parameter WIDTH = 4, parameter CMD_WIDTH = 4)();
+  // 19 CONSTANTS+ 2 INPUTS +(RESERVED+OUTPUT)+CMD
+  localparam TESTCASE_WIDTH = 19 + 2*WIDTH +(2*WIDTH +1)+ CMD_WIDTH;
+  //PACKET_WIDTH + 6 CONSTANTS+(RESERVED+OUTPUT)
+  localparam RESPONSE_WIDTH = TESTCASE_WIDTH + 6 + (2*WIDTH + 1);
+  localparam RESULT_WIDTH = (2*WIDTH + 1) +6;  // RES + COUT + EGL + OVF + ERR
+  //EXPECTED_RES+RESERVED+FEAUTRE_ID+EXACT
+  localparam SCB_WIDTH = 3+(6+WIDTH+1)+ WIDTH + 8 + (6+2*WIDTH+1);
+
+  reg [TESTCASE_WIDTH-1:0] curr_test_case = 0;
+  reg [TESTCASE_WIDTH-1:0] stimulus_mem [0:`no_of_testcase-1];
+  reg [RESPONSE_WIDTH-1:0] response_packet;
+
+//Declaration for giving the Stimulus
+  integer i, j;
+  event fetch_stimulus;
+  reg CLK, RST, CE;
+  reg [WIDTH-1:0] OPA, OPB;
+  reg [CMD_WIDTH-1:0] CMD;
+  reg MODE, CIN;
+  reg [7:0] Feature_ID;
+  reg [2:0] Comparison_EGL;
+  reg [WIDTH:0] Expected_RES;
+  reg [WIDTH-1:0] Reserved_RES;
+  reg err, cout, ov;
+  reg [1:0] INP_VALID;
+
+  wire [2*WIDTH:0] RES;
+  wire ERR, OFLOW, COUT;
+  wire [2:0] EGL;
+  wire [RESULT_WIDTH - 1:0] expected_data;
+  reg [RESULT_WIDTH - 1:0] exact_data;
+
+  NEW_ALU #(.OUT(WIDTH), .CMD_WIDTH(CMD_WIDTH)) inst_dut (
+    .OPA(OPA), .OPB(OPB), .CIN(CIN), .CLK(CLK), .CMD(CMD), .CE(CE), .MODE(MODE),
+    .COUT(COUT), .OFLOW(OFLOW), .RES(RES), .G(EGL[1]), .E(EGL[2]), .L(EGL[0]), .ERR(ERR), .RESET(RST), .IP_VALID(INP_VALID)
+  );
+
+  integer stim_mem_ptr = 0, stim_stimulus_mem_ptr = 0;
+integer fid =0 , pointer =0 ;
+
+  task read_stimulus(); begin
+    #10 $readmemb("stimulus1.txt", stimulus_mem);
+  end endtask
+
+  always @(fetch_stimulus) begin
+    curr_test_case = stimulus_mem[stim_mem_ptr];
+    $display ("Stimulus data = %0b", stimulus_mem[stim_mem_ptr]);
+    stim_mem_ptr = stim_mem_ptr + 1;
+  end
+
+  initial begin CLK = 0; forever #60 CLK = ~CLK; end
+
+  task automatic driver();
+    begin
+      ->fetch_stimulus;
+      @(posedge CLK);
+      Feature_ID = curr_test_case[(TESTCASE_WIDTH-1)-: 8];
+      INP_VALID = curr_test_case[(TESTCASE_WIDTH-9) -: 2];
+      OPA = curr_test_case[(TESTCASE_WIDTH - 11) -: WIDTH ];
+      OPB = curr_test_case[(TESTCASE_WIDTH - 11 - WIDTH)-: WIDTH];
+      CMD = curr_test_case[(TESTCASE_WIDTH - 11 - 2*WIDTH) -:4];//21:18
+      CIN = curr_test_case[(TESTCASE_WIDTH - 11 - 2*WIDTH - CMD_WIDTH)];//17
+      CE = curr_test_case[(TESTCASE_WIDTH - 11 - 2*WIDTH - CMD_WIDTH-1)];//16
+      MODE = curr_test_case[(TESTCASE_WIDTH - 11 - 2*WIDTH - CMD_WIDTH-2)];//15
+      Reserved_RES = curr_test_case[(TESTCASE_WIDTH - 11 - 2*WIDTH - CMD_WIDTH-3)-:WIDTH];
+      Expected_RES = curr_test_case[(TESTCASE_WIDTH - 11 - 2*WIDTH - CMD_WIDTH-3-WIDTH)-: WIDTH+1];
+      cout = curr_test_case[5];
+      Comparison_EGL = curr_test_case[4:2];//3bit_EGL
+      ov = curr_test_case[1];//1_ERR
+      err = curr_test_case[0];//0_OV
+
+      $display("Driving: Feature_ID=%8b, INP_VALID=%2b, OPA=%b, OPB=%b, CMD=%b, CIN=%b, CE=%b, MODE=%b, Reserved_RES=%b, expected_result=%b, COUT=%b, comparision_EGL=%3b, OV=%b, ERR=%b",
+               Feature_ID,INP_VALID, OPA, OPB, CMD,CIN,CE,MODE,Reserved_RES,Expected_RES,cout,Comparison_EGL,ov,err);
+    end
+  endtask
+
+  task dut_reset(); begin
+    CE = 1;RST=0;
+    #10 RST = 1;
+    #20 RST = 0;
+  end endtask
+
+  task global_init();
+    begin
+        curr_test_case = {TESTCASE_WIDTH{1'b0}};
+        response_packet = {(TESTCASE_WIDTH + 6 +(2*WIDTH+1)){1'b0}};
+        stim_mem_ptr = 0;
+    end
+  endtask
+
+  task monitor(); begin
+    repeat(4) @(posedge CLK);
+    #5;
+      response_packet[TESTCASE_WIDTH-1:0] = curr_test_case;
+      response_packet[TESTCASE_WIDTH +: 5] = {ERR, OFLOW, EGL, COUT};
+      response_packet[TESTCASE_WIDTH+5 +: WIDTH+1] = RES;
+      exact_data = {RES, COUT, EGL, OFLOW, ERR};
+
+      $display("Monitor: RES=%b, COUT=%b, EGL=%b, OFLOW=%b, ERR=%b",
+               RES, COUT, EGL, OFLOW, ERR);
+  end
+  endtask
+
+  assign expected_data = {Reserved_RES,Expected_RES, cout, Comparison_EGL, ov, err};
+
+  reg [SCB_WIDTH-1:0] scb_stimulus_mem [0:`no_of_testcase-1];
+
+  task score_board();
+    reg[6+WIDTH :0]expected_res;
+    reg[WIDTH-1:0]Reserved_RES;
+    reg[7:0]feature_id;
+    reg[6+2*WIDTH :0]response_data;
+    begin
+      #5;
+      feature_id = curr_test_case[(TESTCASE_WIDTH -1) -:8];
+      Reserved_RES = curr_test_case[(TESTCASE_WIDTH - 11 - 2*WIDTH - CMD_WIDTH-3)-:WIDTH];
+      expected_res = curr_test_case[(TESTCASE_WIDTH - 11 - 2*WIDTH - CMD_WIDTH-3-WIDTH)-: WIDTH+1];
+      response_data = response_packet[TESTCASE_WIDTH +:(2*WIDTH+7)];
+      $display("expected result = %b ,response data = %b",expected_data,exact_data);
+      if(expected_data === exact_data) begin
+        scb_stimulus_mem[stim_stimulus_mem_ptr] = {1'b0, Feature_ID,
+          expected_data, response_data, 1'b0, `PASS};
+        $display("Test %0d PASSED", stim_stimulus_mem_ptr);
+      end
+      else begin
+        scb_stimulus_mem[stim_stimulus_mem_ptr] = {1'b0, Feature_ID,
+          expected_data, response_data, 1'b0, `FAIL};
+        $display("Test %0d FAILED", stim_stimulus_mem_ptr);
+      end
+      stim_stimulus_mem_ptr = stim_stimulus_mem_ptr + 1;
+    end
+  endtask
+
+task gen_report;
+    integer file_id, pointer, i;  // Declare loop variable outside
+    begin
+      file_id = $fopen("results.txt", "w");
+      pointer = 0;  // Initialize counter
+      while (pointer < `no_of_testcase) begin  // Changed to while loop
+        $fdisplay(file_id,  "Feature ID %8b : %s",
+                 scb_stimulus_mem[pointer][SCB_WIDTH-2 -: 8],
+                 scb_stimulus_mem[pointer][0] ? "PASS" : "FAIL");
+        pointer = pointer + 1;  // Changed from ++
+      end
+      $fclose(file_id);
+    end
+  endtask
+
+  initial begin
+     $dumpfile("waveform.vcd");
+    $dumpvars(0,new_test_bench_alu);
+   #10;
+    $display("\n--- Starting ALU Verification ---");
+    global_init();
+    dut_reset();
+    read_stimulus();
+    for(j = 0; j <= `no_of_testcase-1; j = j + 1) begin
+      fork
+        driver();
+        monitor();
+      join
+      score_board();
+    end
+    gen_report();
+    $fclose(fid);
+    #1000 $display("\n--- Verification Complete ---");
+    $finish();
+  end
+endmodule
